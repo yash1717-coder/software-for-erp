@@ -1,6 +1,14 @@
 const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL || "https://sfhnaamxhwmzppmcmvbo.supabase.co";
 const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "sb_publishable_hkCdMoiafha4Zxs6nm0t0Q_nZBb-JQD";
 
+const isLocalMode = 
+  !SUPABASE_URL || 
+  SUPABASE_URL.includes("sfhnaamxhwmzppmcmvbo.supabase.co") || 
+  SUPABASE_URL.includes("your-project.supabase.co") ||
+  !SUPABASE_ANON_KEY ||
+  SUPABASE_ANON_KEY.includes("sb_publishable") ||
+  SUPABASE_ANON_KEY.includes("your-anon-key");
+
 export interface SupabaseOptions {
   order?: string;
   limit?: number;
@@ -111,6 +119,25 @@ export const sb = {
 
     return {
       select: async (cols: string = '*', opts: SupabaseOptions = {}): Promise<{ data: T[] | null; error: string | null }> => {
+        if (isLocalMode) {
+          let localRows = getLocalTable(table);
+          if (opts.filter) {
+            localRows = localRows.filter(row => matchLocalRow(row, opts.filter));
+          }
+          if (opts.order) {
+            const [orderCol, orderDir] = opts.order.split('.');
+            localRows.sort((a, b) => {
+              const valA = String(a[orderCol] || '');
+              const valB = String(b[orderCol] || '');
+              return orderDir === 'desc' ? valB.localeCompare(valA) : valA.localeCompare(valB);
+            });
+          }
+          if (opts.limit) {
+            localRows = localRows.slice(0, opts.limit);
+          }
+          return { data: localRows as T[], error: null };
+        }
+
         try {
           let url = `${base}/${table}?select=${cols}`;
           if (opts.order) {
@@ -129,7 +156,14 @@ export const sb = {
             }
           });
           if (!r.ok) {
-            throw new Error(`HTTP Error: ${r.status} ${r.statusText}`);
+            let errorText = '';
+            try {
+              const errJson = await r.json();
+              errorText = errJson.message || errJson.details || JSON.stringify(errJson);
+            } catch {
+              errorText = await r.text();
+            }
+            throw new Error(`HTTP Error ${r.status}: ${errorText || r.statusText}`);
           }
           const data = await r.json();
           // Update our local storage cache on successful remote fetch
@@ -158,8 +192,6 @@ export const sb = {
       },
 
       insert: async (rows: Partial<T> | Partial<T>[]): Promise<{ data: T[] | null; error: string | null }> => {
-        // Prepare local rows with valid IDs and timestamps
-        const localRows = getLocalTable(table);
         const incoming = Array.isArray(rows) ? rows : [rows];
         const processedIncoming = incoming.map(r => ({
           id: generateId(),
@@ -167,9 +199,12 @@ export const sb = {
           ...r
         }));
 
-        // Write directly to local storage to guarantee immediate progress
-        const updatedRows = [...processedIncoming, ...localRows];
-        saveLocalTable(table, updatedRows);
+        if (isLocalMode) {
+          const localRows = getLocalTable(table);
+          const updatedRows = [...processedIncoming, ...localRows];
+          saveLocalTable(table, updatedRows);
+          return { data: processedIncoming as T[], error: null };
+        }
 
         try {
           const body = Array.isArray(rows) ? rows : [rows];
@@ -191,35 +226,38 @@ export const sb = {
             }
             throw new Error(`HTTP Error ${r.status}: ${errorText || r.statusText}`);
           }
-          // Try to return remote representation, else fallback to processed local data
+
+          let data: T[] = [];
           try {
-            const data = await r.json();
-            return { data, error: null };
+            data = await r.json();
           } catch {
-            return { data: processedIncoming as T[], error: null };
+            data = processedIncoming as T[];
           }
+
+          const localRows = getLocalTable(table);
+          saveLocalTable(table, [...data, ...localRows]);
+          return { data, error: null };
         } catch (e: any) {
-          console.warn(`Supabase Remote Insert failed on [${table}]. Falling back to LocalStorage.`, e);
-          return { data: processedIncoming as T[], error: null };
+          console.error(`Supabase Remote Insert failed on [${table}].`, e);
+          return { data: null, error: e.message || String(e) };
         }
       },
 
       update: async (row: Partial<T>, filter: SupabaseFilter): Promise<{ data: T[] | null; error: string | null }> => {
-        // Persist locally first
-        const localRows = getLocalTable(table);
-        let updatedLocal: any[] = [];
-        let updatedCount = 0;
-        
-        const localRowsNew = localRows.map(r => {
-          if (String(r[filter.col]) === String(filter.val)) {
-            updatedCount++;
-            const updated = { ...r, ...row };
-            updatedLocal.push(updated);
-            return updated;
-          }
-          return r;
-        });
-        saveLocalTable(table, localRowsNew);
+        if (isLocalMode) {
+          const localRows = getLocalTable(table);
+          let updatedLocal: any[] = [];
+          const localRowsNew = localRows.map(r => {
+            if (String(r[filter.col]) === String(filter.val)) {
+              const updated = { ...r, ...row };
+              updatedLocal.push(updated);
+              return updated;
+            }
+            return r;
+          });
+          saveLocalTable(table, localRowsNew);
+          return { data: updatedLocal as T[], error: null };
+        }
 
         try {
           const url = `${base}/${table}?${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
@@ -241,23 +279,36 @@ export const sb = {
             }
             throw new Error(`HTTP Error ${r.status}: ${errorText || r.statusText}`);
           }
+
+          let data: T[] = [];
           try {
-            const data = await r.json();
-            return { data, error: null };
+            data = await r.json();
           } catch {
-            return { data: updatedLocal as T[], error: null };
+            data = [row] as any;
           }
+
+          const localRows = getLocalTable(table);
+          const localRowsNew = localRows.map(r => {
+            if (String(r[filter.col]) === String(filter.val)) {
+              return { ...r, ...row };
+            }
+            return r;
+          });
+          saveLocalTable(table, localRowsNew);
+          return { data, error: null };
         } catch (e: any) {
-          console.warn(`Supabase Remote Update failed on [${table}]. Falling back to LocalStorage.`, e);
-          return { data: updatedLocal as T[], error: null };
+          console.error(`Supabase Remote Update failed on [${table}].`, e);
+          return { data: null, error: e.message || String(e) };
         }
       },
 
       delete: async (filter: SupabaseFilter): Promise<{ error: string | null }> => {
-        // Delete locally first
-        const localRows = getLocalTable(table);
-        const filteredLocal = localRows.filter(r => String(r[filter.col]) !== String(filter.val));
-        saveLocalTable(table, filteredLocal);
+        if (isLocalMode) {
+          const localRows = getLocalTable(table);
+          const filteredLocal = localRows.filter(r => String(r[filter.col]) !== String(filter.val));
+          saveLocalTable(table, filteredLocal);
+          return { error: null };
+        }
 
         try {
           const url = `${base}/${table}?${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
@@ -275,10 +326,14 @@ export const sb = {
             }
             throw new Error(`HTTP Error ${r.status}: ${errorText || r.statusText}`);
           }
+
+          const localRows = getLocalTable(table);
+          const filteredLocal = localRows.filter(r => String(r[filter.col]) !== String(filter.val));
+          saveLocalTable(table, filteredLocal);
           return { error: null };
         } catch (e: any) {
-          console.warn(`Supabase Remote Delete failed on [${table}]. Falling back to LocalStorage.`, e);
-          return { error: null };
+          console.error(`Supabase Remote Delete failed on [${table}].`, e);
+          return { error: e.message || String(e) };
         }
       }
     };
