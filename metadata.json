@@ -1,0 +1,6 @@
+{
+  "name": "INFIEV ERP",
+  "description": "Manufacturing Intelligence Platform with real-time operations tracking, analytics, and AI assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
