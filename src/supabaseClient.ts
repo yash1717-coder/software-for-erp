@@ -9,8 +9,7 @@ export function getSupabaseCredentials() {
     !url || 
     url.includes("your-project.supabase.co") ||
     !key ||
-    key.includes("your-anon-key") ||
-    url.includes("sfhnaamxhwmzppmcmvbo.supabase.co");
+    key.includes("your-anon-key");
     
   return { url, key, isLocal };
 }
