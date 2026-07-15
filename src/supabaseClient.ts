@@ -3,10 +3,8 @@ const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "sb
 
 export const isLocalMode = 
   !SUPABASE_URL || 
-  SUPABASE_URL.includes("sfhnaamxhwmzppmcmvbo.supabase.co") || 
   SUPABASE_URL.includes("your-project.supabase.co") ||
   !SUPABASE_ANON_KEY ||
-  SUPABASE_ANON_KEY.includes("sb_publishable") ||
   SUPABASE_ANON_KEY.includes("your-anon-key");
 
 export interface SupabaseOptions {
