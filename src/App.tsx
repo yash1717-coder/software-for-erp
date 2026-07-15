@@ -13,7 +13,7 @@ import { NotificationPanel } from './components/NotificationPanel';
 import { AdminOverview } from './components/AdminOverview';
 import { TaskAssignment } from './components/TaskAssignment';
 import { KPICard } from './components/SharedUI';
-import { sb } from './supabaseClient';
+import { sb, isLocalMode } from './supabaseClient';
 
 // Dynamic navigation titles
 const navTitles: { [key: string]: string } = {
@@ -485,11 +485,23 @@ export default function App() {
             </button>
             {/* Online beacon */}
             <div className="flex items-center gap-2">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-              </span>
-              <span className="text-[10px] font-mono text-emerald-400 tracking-wider font-semibold">LIVE CONNECTED</span>
+              {isLocalMode ? (
+                <>
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+                  </span>
+                  <span className="text-[9px] font-mono text-amber-400 tracking-wider font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20" title="Data is stored locally in this browser only. Set VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY to sync.">LOCAL OFFLINE DEMO</span>
+                </>
+              ) : (
+                <>
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-[9px] font-mono text-emerald-400 tracking-wider font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" title="Connected to your live remote Supabase database. All devices synchronized.">LIVE DATABASE SYNC</span>
+                </>
+              )}
             </div>
           </div>
         </header>

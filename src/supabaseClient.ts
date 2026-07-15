@@ -1,7 +1,7 @@
 const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL || "https://sfhnaamxhwmzppmcmvbo.supabase.co";
 const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "sb_publishable_hkCdMoiafha4Zxs6nm0t0Q_nZBb-JQD";
 
-const isLocalMode = 
+export const isLocalMode = 
   !SUPABASE_URL || 
   SUPABASE_URL.includes("sfhnaamxhwmzppmcmvbo.supabase.co") || 
   SUPABASE_URL.includes("your-project.supabase.co") ||
