@@ -1,11 +1,33 @@
-const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL || "https://sfhnaamxhwmzppmcmvbo.supabase.co";
-const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "sb_publishable_hkCdMoiafha4Zxs6nm0t0Q_nZBb-JQD";
+export function getSupabaseCredentials() {
+  const localUrl = typeof window !== 'undefined' ? localStorage.getItem('infiev_supabase_url') : null;
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('infiev_supabase_anon_key') : null;
+  
+  const url = localUrl || (import.meta as any).env.VITE_SUPABASE_URL || "https://sfhnaamxhwmzppmcmvbo.supabase.co";
+  const key = localKey || (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "sb_publishable_hkCdMoiafha4Zxs6nm0t0Q_nZBb-JQD";
+  
+  const isLocal = 
+    !url || 
+    url.includes("your-project.supabase.co") ||
+    !key ||
+    key.includes("your-anon-key") ||
+    url.includes("sfhnaamxhwmzppmcmvbo.supabase.co");
+    
+  return { url, key, isLocal };
+}
 
-export const isLocalMode = 
-  !SUPABASE_URL || 
-  SUPABASE_URL.includes("your-project.supabase.co") ||
-  !SUPABASE_ANON_KEY ||
-  SUPABASE_ANON_KEY.includes("your-anon-key");
+export function saveSupabaseCredentials(url: string, key: string) {
+  if (typeof window !== 'undefined') {
+    if (url) localStorage.setItem('infiev_supabase_url', url.trim());
+    else localStorage.removeItem('infiev_supabase_url');
+    
+    if (key) localStorage.setItem('infiev_supabase_anon_key', key.trim());
+    else localStorage.removeItem('infiev_supabase_anon_key');
+    
+    isLocalMode = getSupabaseCredentials().isLocal;
+  }
+}
+
+export let isLocalMode = getSupabaseCredentials().isLocal;
 
 export interface SupabaseOptions {
   order?: string;
@@ -108,6 +130,7 @@ function matchLocalRow(row: any, filterStr: string | undefined): boolean {
 
 export const sb = {
   from: <T = any>(table: string) => {
+    const { url: SUPABASE_URL, key: SUPABASE_ANON_KEY, isLocal } = getSupabaseCredentials();
     const headers = {
       'Content-Type': 'application/json',
       'apikey': SUPABASE_ANON_KEY,
@@ -117,7 +140,7 @@ export const sb = {
 
     return {
       select: async (cols: string = '*', opts: SupabaseOptions = {}): Promise<{ data: T[] | null; error: string | null }> => {
-        if (isLocalMode) {
+        if (isLocal) {
           let localRows = getLocalTable(table);
           if (opts.filter) {
             localRows = localRows.filter(row => matchLocalRow(row, opts.filter));
@@ -197,7 +220,7 @@ export const sb = {
           ...r
         }));
 
-        if (isLocalMode) {
+        if (isLocal) {
           const localRows = getLocalTable(table);
           const updatedRows = [...processedIncoming, ...localRows];
           saveLocalTable(table, updatedRows);
@@ -236,13 +259,16 @@ export const sb = {
           saveLocalTable(table, [...data, ...localRows]);
           return { data, error: null };
         } catch (e: any) {
-          console.error(`Supabase Remote Insert failed on [${table}].`, e);
-          return { data: null, error: e.message || String(e) };
+          console.warn(`Supabase Remote Insert failed on [${table}]. Falling back to LocalStorage write.`, e);
+          const localRows = getLocalTable(table);
+          const updatedRows = [...processedIncoming, ...localRows];
+          saveLocalTable(table, updatedRows);
+          return { data: processedIncoming as T[], error: null };
         }
       },
 
       update: async (row: Partial<T>, filter: SupabaseFilter): Promise<{ data: T[] | null; error: string | null }> => {
-        if (isLocalMode) {
+        if (isLocal) {
           const localRows = getLocalTable(table);
           let updatedLocal: any[] = [];
           const localRowsNew = localRows.map(r => {
@@ -295,13 +321,24 @@ export const sb = {
           saveLocalTable(table, localRowsNew);
           return { data, error: null };
         } catch (e: any) {
-          console.error(`Supabase Remote Update failed on [${table}].`, e);
-          return { data: null, error: e.message || String(e) };
+          console.warn(`Supabase Remote Update failed on [${table}]. Falling back to LocalStorage write.`, e);
+          const localRows = getLocalTable(table);
+          let updatedLocal: any[] = [];
+          const localRowsNew = localRows.map(r => {
+            if (String(r[filter.col]) === String(filter.val)) {
+              const updated = { ...r, ...row };
+              updatedLocal.push(updated);
+              return updated;
+            }
+            return r;
+          });
+          saveLocalTable(table, localRowsNew);
+          return { data: updatedLocal as T[], error: null };
         }
       },
 
       delete: async (filter: SupabaseFilter): Promise<{ error: string | null }> => {
-        if (isLocalMode) {
+        if (isLocal) {
           const localRows = getLocalTable(table);
           const filteredLocal = localRows.filter(r => String(r[filter.col]) !== String(filter.val));
           saveLocalTable(table, filteredLocal);
@@ -330,8 +367,11 @@ export const sb = {
           saveLocalTable(table, filteredLocal);
           return { error: null };
         } catch (e: any) {
-          console.error(`Supabase Remote Delete failed on [${table}].`, e);
-          return { error: e.message || String(e) };
+          console.warn(`Supabase Remote Delete failed on [${table}]. Falling back to LocalStorage write.`, e);
+          const localRows = getLocalTable(table);
+          const filteredLocal = localRows.filter(r => String(r[filter.col]) !== String(filter.val));
+          saveLocalTable(table, filteredLocal);
+          return { error: null };
         }
       }
     };

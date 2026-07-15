@@ -13,7 +13,8 @@ import { NotificationPanel } from './components/NotificationPanel';
 import { AdminOverview } from './components/AdminOverview';
 import { TaskAssignment } from './components/TaskAssignment';
 import { KPICard } from './components/SharedUI';
-import { sb, isLocalMode } from './supabaseClient';
+import { sb, getSupabaseCredentials } from './supabaseClient';
+import { DatabaseConfigModal } from './components/DatabaseConfigModal';
 
 // Dynamic navigation titles
 const navTitles: { [key: string]: string } = {
@@ -50,6 +51,10 @@ export default function App() {
   const [view, setView] = useState('overview');
   const [showNotif, setShowNotif] = useState(false);
   const [time, setTime] = useState(new Date());
+  const [showDbConfig, setShowDbConfig] = useState(false);
+  const [dbStatusTick, setDbStatusTick] = useState(0);
+
+  const { isLocal } = getSupabaseCredentials();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -484,14 +489,18 @@ export default function App() {
               <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-rose-500 rounded-full border border-slate-900" />
             </button>
             {/* Online beacon */}
-            <div className="flex items-center gap-2">
-              {isLocalMode ? (
+            <button
+              onClick={() => setShowDbConfig(true)}
+              className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity bg-transparent border-none p-1 focus:outline-none"
+              title="Click to configure Supabase database synchronization settings"
+            >
+              {isLocal ? (
                 <>
                   <span className="relative flex h-1.5 w-1.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
                   </span>
-                  <span className="text-[9px] font-mono text-amber-400 tracking-wider font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20" title="Data is stored locally in this browser only. Set VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY to sync.">LOCAL OFFLINE DEMO</span>
+                  <span className="text-[9px] font-mono text-amber-400 tracking-wider font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">LOCAL OFFLINE DEMO</span>
                 </>
               ) : (
                 <>
@@ -499,10 +508,10 @@ export default function App() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                   </span>
-                  <span className="text-[9px] font-mono text-emerald-400 tracking-wider font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20" title="Connected to your live remote Supabase database. All devices synchronized.">LIVE DATABASE SYNC</span>
+                  <span className="text-[9px] font-mono text-emerald-400 tracking-wider font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">LIVE DATABASE SYNC</span>
                 </>
               )}
-            </div>
+            </button>
           </div>
         </header>
 
@@ -511,11 +520,19 @@ export default function App() {
           {/* Ambient subtle decorative light effect */}
           <div className="absolute top-1/4 left-1/3 w-96 h-96 rounded-full bg-cyan-500/[0.015] blur-3xl pointer-events-none" />
           
-          <div className="relative z-10 animate-fade-up">
+          <div key={dbStatusTick} className="relative z-10 animate-fade-up">
             {renderViewContent()}
           </div>
         </main>
       </div>
+
+      {/* DATABASE CONFIGURATION MODAL */}
+      {showDbConfig && (
+        <DatabaseConfigModal 
+          onClose={() => setShowDbConfig(false)} 
+          onSave={() => setDbStatusTick((t) => t + 1)} 
+        />
+      )}
 
       {/* SLIDEALERT PANEL */}
       {showNotif && <NotificationPanel user={user} onClose={() => setShowNotif(false)} />}
