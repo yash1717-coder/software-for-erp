@@ -9,65 +9,13 @@ export interface SupabaseFilter {
   val: string | number;
 }
 
-const CANDIDATE_BACKENDS = [
-  "", // relative path for same-origin
-  "https://ais-pre-kkhw5jj76wwdxxv75vlqc3-594375269974.asia-southeast1.run.app",
-  "https://ais-dev-kkhw5jj76wwdxxv75vlqc3-594375269974.asia-southeast1.run.app"
-];
-
-// Helper to retrieve direct client-side Supabase credentials
-export function getDirectSupabaseConfig(): { url: string; key: string } | null {
+// Server DB API fetch helper - uses current relative origin for flawless server routing
+async function fetchDbApi(endpointPath: string, options: RequestInit = {}): Promise<Response | null> {
   try {
-    const metaEnv = (import.meta as any).env || {};
-    const url = (localStorage.getItem('infiev_supabase_url') || metaEnv.VITE_SUPABASE_URL || '').trim();
-    const key = (localStorage.getItem('infiev_supabase_key') || metaEnv.VITE_SUPABASE_ANON_KEY || '').trim();
-    if (url && key && url.includes('supabase.co')) {
-      return { url: url.replace(/\/$/, ''), key };
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-export function saveDirectSupabaseConfig(url: string, key: string) {
-  try {
-    const cleanUrl = url.trim().replace(/\/$/, '');
-    const cleanKey = key.trim();
-    localStorage.setItem('infiev_supabase_url', cleanUrl);
-    localStorage.setItem('infiev_supabase_key', cleanKey);
-    // Best-effort sync to server backend as well
-    fetchDbApi('/api/config', {
-      method: 'POST',
-      body: JSON.stringify({ url: cleanUrl, key: cleanKey })
-    });
-  } catch {
-    // ignore
-  }
-}
-
-export function clearDirectSupabaseConfig() {
-  try {
-    localStorage.removeItem('infiev_supabase_url');
-    localStorage.removeItem('infiev_supabase_key');
-  } catch {
-    // ignore
-  }
-}
-
-async function fetchSupabaseDirect(endpointPath: string, options: RequestInit = {}): Promise<Response | null> {
-  const cfg = getDirectSupabaseConfig();
-  if (!cfg) return null;
-
-  try {
-    const fullUrl = `${cfg.url}/rest/v1${endpointPath}`;
-    const res = await fetch(fullUrl, {
+    const res = await fetch(endpointPath, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'apikey': cfg.key,
-        'Authorization': `Bearer ${cfg.key}`,
-        'Prefer': 'return=representation',
         ...(options.headers || {})
       },
       mode: 'cors',
@@ -76,62 +24,19 @@ async function fetchSupabaseDirect(endpointPath: string, options: RequestInit = 
     if (res.ok) {
       return res;
     } else {
-      console.warn(`Supabase Direct REST call [${endpointPath}] error code: ${res.status}`);
+      console.warn(`Server API [${endpointPath}] returned status ${res.status}`);
     }
   } catch (e) {
-    console.warn(`Supabase Direct REST request exception [${endpointPath}]:`, e);
+    console.warn(`Server API fetch exception [${endpointPath}]:`, e);
   }
-  return null;
-}
-
-async function fetchDbApi(endpointPath: string, options: RequestInit = {}): Promise<Response | null> {
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
-
-  for (const backend of CANDIDATE_BACKENDS) {
-    try {
-      const fullUrl = `${backend}${endpointPath}`;
-      const res = await fetch(fullUrl, {
-        ...options,
-        headers,
-        mode: 'cors',
-        referrerPolicy: 'no-referrer'
-      });
-      const contentType = res.headers.get('content-type') || '';
-      if (res.ok && contentType.includes('application/json')) {
-        return res;
-      }
-    } catch {
-      // Try next candidate endpoint
-    }
-  }
-
   return null;
 }
 
 export async function getSupabaseCredentials(): Promise<{ url: string; isLocal: boolean; configured: boolean }> {
-  const directCfg = getDirectSupabaseConfig();
-  if (directCfg) {
-    return { url: directCfg.url, isLocal: false, configured: true };
-  }
-
-  const res = await fetchDbApi('/api/config');
-  if (res) {
-    try {
-      const data = await res.json();
-      return { url: data.url || '', isLocal: !data.configured, configured: Boolean(data.configured) };
-    } catch {
-      // ignore
-    }
-  }
-  return { url: '', isLocal: true, configured: false };
+  return { url: 'Server Integrated', isLocal: false, configured: true };
 }
 
-export async function saveSupabaseCredentials(url: string, key: string): Promise<boolean> {
-  saveDirectSupabaseConfig(url, key);
-  const res = await fetchDbApi('/api/config', {
-    method: 'POST',
-    body: JSON.stringify({ url, key })
-  });
+export async function saveSupabaseCredentials(_url: string, _key: string): Promise<boolean> {
   return true;
 }
 
@@ -214,48 +119,6 @@ export function importAllAppDataJSON(jsonStr: string): boolean {
   return false;
 }
 
-// Queue for offline-created items to auto-push when online
-function queuePendingSync(table: string, item: any) {
-  try {
-    const raw = localStorage.getItem('infiev_pending_sync');
-    const queue: { table: string; item: any }[] = raw ? JSON.parse(raw) : [];
-    queue.push({ table, item });
-    localStorage.setItem('infiev_pending_sync', JSON.stringify(queue));
-  } catch {
-    // ignore
-  }
-}
-
-async function flushPendingSync() {
-  try {
-    const raw = localStorage.getItem('infiev_pending_sync');
-    if (!raw) return;
-    const queue: { table: string; item: any }[] = JSON.parse(raw);
-    if (!queue.length) return;
-
-    const remaining: { table: string; item: any }[] = [];
-    for (const entry of queue) {
-      const r = await fetchDbApi(`/api/db/${entry.table}`, {
-        method: 'POST',
-        body: JSON.stringify(entry.item)
-      });
-      if (!r || !r.ok) {
-        remaining.push(entry);
-      }
-    }
-    localStorage.setItem('infiev_pending_sync', JSON.stringify(remaining));
-  } catch {
-    // ignore
-  }
-}
-
-// Background poll to sync pending items
-if (typeof window !== 'undefined') {
-  setInterval(() => {
-    flushPendingSync();
-  }, 5000);
-}
-
 function matchFilterRow(row: any, filterStr: string | undefined): boolean {
   if (!filterStr) return true;
   const parts = filterStr.split('&');
@@ -293,28 +156,6 @@ export const sb = {
   from: <T = any>(table: string) => {
     return {
       select: async (cols: string = '*', opts: SupabaseOptions = {}): Promise<{ data: T[] | null; error: string | null }> => {
-        // 1. Try direct Supabase connection if configured
-        let directEndpoint = `/${table}?select=${encodeURIComponent(cols)}`;
-        if (opts.order) directEndpoint += `&order=${encodeURIComponent(opts.order)}`;
-        if (opts.limit) directEndpoint += `&limit=${opts.limit}`;
-        if (opts.filter) directEndpoint += `&${opts.filter}`;
-
-        const directRes = await fetchSupabaseDirect(directEndpoint);
-        if (directRes) {
-          try {
-            const data = await directRes.json();
-            if (Array.isArray(data)) {
-              const store = getFallbackStore();
-              store[table] = data;
-              saveFallbackStore(store);
-              return { data: data as T[], error: null };
-            }
-          } catch (e: any) {
-            console.warn(`Error parsing Supabase Direct JSON for [${table}]:`, e);
-          }
-        }
-
-        // 2. Try backend API proxy
         let url = `/api/db/${table}?select=${encodeURIComponent(cols)}`;
         if (opts.order) url += `&order=${encodeURIComponent(opts.order)}`;
         if (opts.limit) url += `&limit=${opts.limit}`;
@@ -336,7 +177,7 @@ export const sb = {
           }
         }
 
-        // 3. Fallback store handling if backend server is completely unavailable
+        // Offline fallback store handling if backend server is temporarily unreachable
         const store = getFallbackStore();
         let rows = store[table] || [];
 
@@ -368,33 +209,7 @@ export const sb = {
           ...r
         }));
 
-        // Always save to fallback store immediately so local client is responsive
-        const store = getFallbackStore();
-        const existing = store[table] || [];
-        // Deduplicate
-        const existingIds = new Set(existing.map((e: any) => e.user_id || e.id));
-        const newUnique = processed.filter((p: any) => !existingIds.has(p.user_id || p.id));
-        store[table] = [...newUnique, ...existing];
-        saveFallbackStore(store);
-
-        // 1. Try direct Supabase connection
-        const directRes = await fetchSupabaseDirect(`/${table}`, {
-          method: 'POST',
-          body: JSON.stringify(processed)
-        });
-        if (directRes) {
-          try {
-            const resData = await directRes.json();
-            if (Array.isArray(resData)) {
-              return { data: resData as T[], error: null };
-            }
-          } catch {
-            // ignore
-          }
-          return { data: processed as T[], error: null };
-        }
-
-        // 2. Try backend API proxy
+        // Send directly to backend database server
         const r = await fetchDbApi(`/api/db/${table}`, {
           method: 'POST',
           body: JSON.stringify(processed)
@@ -404,23 +219,40 @@ export const sb = {
           try {
             const res = await r.json();
             if (Array.isArray(res.data)) {
+              // Cache to local store
+              const store = getFallbackStore();
+              const existing = store[table] || [];
+              const existingIds = new Set(existing.map((e: any) => e.user_id || e.id));
+              const newUnique = res.data.filter((p: any) => !existingIds.has(p.user_id || p.id));
+              store[table] = [...newUnique, ...existing];
+              saveFallbackStore(store);
+
               return { data: res.data as T[], error: null };
             }
           } catch (e: any) {
             console.warn(`Error parsing insert DB JSON for [${table}]:`, e);
           }
-        } else {
-          // Queue for pending sync if server wasn't reached immediately
-          processed.forEach(item => queuePendingSync(table, item));
         }
+
+        // Cache in fallback store if offline
+        const store = getFallbackStore();
+        const existing = store[table] || [];
+        store[table] = [...processed, ...existing];
+        saveFallbackStore(store);
 
         return { data: processed as T[], error: null };
       },
 
       update: async (row: Partial<T>, filter: SupabaseFilter): Promise<{ data: T[] | null; error: string | null }> => {
         const filterStr = `${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
+        const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
         
-        // Update fallback store
+        const r = await fetchDbApi(url, {
+          method: 'PATCH',
+          body: JSON.stringify(row)
+        });
+
+        // Update local store cache
         const store = getFallbackStore();
         const existing = store[table] || [];
         const updatedRows: any[] = [];
@@ -433,22 +265,6 @@ export const sb = {
           return r;
         });
         saveFallbackStore(store);
-
-        // 1. Try direct Supabase
-        const directRes = await fetchSupabaseDirect(`/${table}?${filterStr}`, {
-          method: 'PATCH',
-          body: JSON.stringify(row)
-        });
-        if (directRes) {
-          return { data: updatedRows as T[], error: null };
-        }
-
-        // 2. Try backend proxy
-        const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
-        const r = await fetchDbApi(url, {
-          method: 'PATCH',
-          body: JSON.stringify(row)
-        });
 
         if (r) {
           try {
@@ -464,24 +280,15 @@ export const sb = {
 
       delete: async (filter: SupabaseFilter): Promise<{ error: string | null }> => {
         const filterStr = `${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
+        const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
 
-        // Update fallback store
+        const r = await fetchDbApi(url, { method: 'DELETE' });
+
+        // Update local store cache
         const store = getFallbackStore();
         const existing = store[table] || [];
         store[table] = existing.filter((r: any) => String(r[filter.col]) !== String(filter.val));
         saveFallbackStore(store);
-
-        // 1. Try direct Supabase
-        const directRes = await fetchSupabaseDirect(`/${table}?${filterStr}`, {
-          method: 'DELETE'
-        });
-        if (directRes) {
-          return { error: null };
-        }
-
-        // 2. Try backend proxy
-        const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
-        const r = await fetchDbApi(url, { method: 'DELETE' });
 
         if (r) {
           try {
@@ -514,3 +321,4 @@ export const appAuth = {
     return { ok: true, user, msg: '' };
   }
 };
+

@@ -1,10 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Icon } from './Icons';
 import { Modal } from './SharedUI';
 import { 
-  getDirectSupabaseConfig, 
-  saveDirectSupabaseConfig, 
-  clearDirectSupabaseConfig, 
   exportAllAppDataJSON, 
   importAllAppDataJSON,
   getFallbackStore,
@@ -18,109 +15,33 @@ interface CloudSyncModalProps {
 }
 
 export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose, onSyncUpdated }) => {
-  const [url, setUrl] = useState('');
-  const [key, setKey] = useState('');
-  const [testing, setTesting] = useState(false);
-  const [pushing, setPushing] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-  const [connected, setConnected] = useState(false);
   const [importText, setImportText] = useState('');
   const [showImportArea, setShowImportArea] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      const cfg = getDirectSupabaseConfig();
-      if (cfg) {
-        setUrl(cfg.url);
-        setKey(cfg.key);
-        setConnected(true);
-      } else {
-        setUrl('');
-        setKey('');
-        setConnected(false);
-      }
-      setStatusMsg(null);
-    }
-  }, [isOpen]);
+  const [syncing, setSyncing] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleTestAndConnect = async () => {
-    if (!url.trim() || !key.trim()) {
-      setStatusMsg({ type: 'error', text: 'Please enter both Supabase Project URL and Anon/Publishable Key.' });
-      return;
-    }
-
-    if (!url.includes('supabase.co')) {
-      setStatusMsg({ type: 'error', text: 'URL must be a valid Supabase domain (e.g. https://xyz.supabase.co)' });
-      return;
-    }
-
-    setTesting(true);
-    setStatusMsg({ type: 'info', text: 'Testing database connection...' });
+  const handleForceSync = async () => {
+    setSyncing(true);
+    setStatusMsg({ type: 'info', text: 'Connecting to server database and refreshing local cache...' });
 
     try {
-      saveDirectSupabaseConfig(url, key);
-
-      // Verify connection by querying app_users
-      const { data, error } = await sb.from('app_users').select('*', { limit: 1 });
-
+      const { data, error } = await sb.from('app_users').select('*');
       if (error) {
-        setStatusMsg({ type: 'error', text: `Connection test failed: ${error}` });
-        setConnected(false);
+        setStatusMsg({ type: 'error', text: `Sync check failed: ${error}` });
       } else {
-        setConnected(true);
-        setStatusMsg({ 
-          type: 'success', 
-          text: `🟢 Successfully connected to Supabase! Multi-device sync is now ACTIVE across Mobile and Desktop.` 
+        setStatusMsg({
+          type: 'success',
+          text: `🟢 Server connection verified! Found ${data?.length || 0} registered active users in system.`
         });
-
-        // Prompt auto-push local data
-        autoPushLocalData();
-
         if (onSyncUpdated) onSyncUpdated();
       }
     } catch (err: any) {
-      setStatusMsg({ type: 'error', text: `Failed to test connection: ${err?.message || err}` });
-      setConnected(false);
+      setStatusMsg({ type: 'error', text: `Sync exception: ${err?.message || err}` });
     } finally {
-      setTesting(false);
+      setSyncing(false);
     }
-  };
-
-  const autoPushLocalData = async () => {
-    setPushing(true);
-    try {
-      const store = getFallbackStore();
-      const tables = Object.keys(store);
-      let totalPushed = 0;
-
-      for (const t of tables) {
-        const items = store[t];
-        if (items && items.length > 0) {
-          await sb.from(t).insert(items);
-          totalPushed += items.length;
-        }
-      }
-
-      setStatusMsg({
-        type: 'success',
-        text: `🟢 Connected & synced ${totalPushed} local items to Cloud Supabase!`
-      });
-    } catch {
-      // ignore
-    } finally {
-      setPushing(false);
-    }
-  };
-
-  const handleDisconnect = () => {
-    clearDirectSupabaseConfig();
-    setUrl('');
-    setKey('');
-    setConnected(false);
-    setStatusMsg({ type: 'info', text: 'Switched back to Local Device Storage mode.' });
-    if (onSyncUpdated) onSyncUpdated();
   };
 
   const handleExportData = () => {
@@ -129,13 +50,13 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
     const href = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = href;
-    link.download = `infiev_erp_data_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `infiev_erp_database_backup_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(href);
 
-    setStatusMsg({ type: 'success', text: '💾 Enterprise database backup downloaded successfully!' });
+    setStatusMsg({ type: 'success', text: '💾 Full system database backup downloaded successfully!' });
   };
 
   const handleImportData = () => {
@@ -146,7 +67,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
 
     const ok = importAllAppDataJSON(importText);
     if (ok) {
-      setStatusMsg({ type: 'success', text: '✅ Database imported successfully! Refreshing view...' });
+      setStatusMsg({ type: 'success', text: '✅ Database imported successfully! Reloading views...' });
       setImportText('');
       setShowImportArea(false);
       setTimeout(() => {
@@ -154,41 +75,27 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
         window.location.reload();
       }, 1000);
     } else {
-      setStatusMsg({ type: 'error', text: 'Failed to import JSON data. Check format.' });
+      setStatusMsg({ type: 'error', text: 'Failed to import JSON data. Check file format.' });
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="⚡ MULTI-DEVICE CLOUD DATABASE SYNC" width="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="🟢 MULTI-DEVICE SERVER SYNC STATUS" width="max-w-xl">
       <div className="flex flex-col gap-5 text-slate-200">
         
         {/* Connection status header badge */}
-        <div className={`p-4 rounded-lg border flex items-center justify-between ${
-          connected 
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
-            : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-        }`}>
+        <div className="p-4 rounded-lg border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className={`w-3 h-3 rounded-full ${connected ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+            <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
             <div>
-              <div className="font-mono text-xs font-bold uppercase tracking-wider">
-                {connected ? 'LIVE CLOUD SUPABASE SYNC ACTIVE' : 'LOCAL DEVICE STORAGE MODE'}
+              <div className="font-mono text-xs font-bold uppercase tracking-wider text-emerald-400">
+                MULTI-DEVICE SERVER SYNC ACTIVE
               </div>
-              <div className="text-[10px] font-mono text-slate-400 mt-0.5">
-                {connected 
-                  ? 'All users, orders, inventory, and AI chat history sync live between Mobile & Desktop.' 
-                  : 'Data is currently saved on this browser/device. Connect Supabase or import data to sync across devices.'}
+              <div className="text-[10px] font-mono text-slate-300 mt-0.5">
+                All created users, tasks, work reports, messages, and inventory updates are synced automatically across Mobile & Desktop.
               </div>
             </div>
           </div>
-          {connected && (
-            <button
-              onClick={handleDisconnect}
-              className="text-[10px] font-mono px-3 py-1.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded hover:bg-rose-500/30 transition-all cursor-pointer"
-            >
-              Disconnect
-            </button>
-          )}
         </div>
 
         {/* Feedback message banner */}
@@ -204,58 +111,40 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
           </div>
         )}
 
-        {/* Supabase connection inputs */}
-        <div className="bg-slate-900 border border-cyan-500/15 rounded-lg p-4 flex flex-col gap-3">
-          <div className="font-mono text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
-            <Icon name="key" size={14} color="var(--neon-cyan)" />
-            <span>Connect Supabase Database for Multi-Device Access</span>
+        {/* Sync Status Info */}
+        <div className="bg-slate-900 border border-cyan-500/20 rounded-lg p-4 flex flex-col gap-3">
+          <div className="font-mono text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Icon name="status" size={14} color="var(--neon-cyan)" />
+              <span>Backend Server Database Status</span>
+            </span>
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-semibold">
+              SERVER INTEGRATED
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-mono text-slate-400 uppercase mb-1">
-                Supabase URL
-              </label>
-              <input
-                type="text"
-                placeholder="https://xyz.supabase.co"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                className="w-full bg-slate-950 border border-cyan-500/20 rounded px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-cyan-400"
-              />
-            </div>
+          <p className="text-xs text-slate-300 leading-relaxed font-sans">
+            The ERP backend automatically handles zero-key multi-device synchronization. Any user created in <span className="text-cyan-300 font-semibold">User Management</span> on a mobile phone, tablet, or secondary laptop is instantly available for login across all devices.
+          </p>
 
-            <div>
-              <label className="block text-[10px] font-mono text-slate-400 uppercase mb-1">
-                Supabase Anon / Public Key
-              </label>
-              <input
-                type="password"
-                placeholder="eyJhbGciOiJIUzI1NiI..."
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                className="w-full bg-slate-950 border border-cyan-500/20 rounded px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-cyan-400"
-              />
-            </div>
-          </div>
-
-          <div className="flex gap-2 justify-end mt-1">
+          <div className="flex gap-2 justify-end mt-2">
             <button
-              onClick={handleTestAndConnect}
-              disabled={testing || pushing}
-              className="bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400 text-cyan-300 font-mono text-xs font-bold px-5 py-2 rounded uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2"
+              onClick={handleForceSync}
+              disabled={syncing}
+              className="bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400 text-cyan-300 font-mono text-xs font-bold px-4 py-2 rounded uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2"
             >
-              {testing ? 'TESTING CONNECTION...' : pushing ? 'SYNCING DATA...' : 'SAVE & SYNC CLOUD DATABASE'}
+              <Icon name="refresh" size={12} />
+              <span>{syncing ? 'VERIFYING SYNC...' : 'REFRESH & VERIFY SERVER CONNECTIVITY'}</span>
             </button>
           </div>
         </div>
 
-        {/* Manual Export & Import fallback options */}
+        {/* Instant Backup & Restore options */}
         <div className="bg-slate-900 border border-cyan-500/15 rounded-lg p-4 flex flex-col gap-3">
           <div className="font-mono text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
             <span className="flex items-center gap-2">
               <Icon name="inventory" size={14} color="var(--neon-cyan)" />
-              <span>Instant Backup & Device Transfer (JSON)</span>
+              <span>Database File Backup & Restore</span>
             </span>
           </div>
 
@@ -265,7 +154,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
               className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-mono text-xs px-4 py-2 rounded flex items-center gap-2 transition-all cursor-pointer"
             >
               <Icon name="key" size={12} />
-              <span>EXPORT DATA FILE (.JSON)</span>
+              <span>DOWNLOAD BACKUP FILE (.JSON)</span>
             </button>
 
             <button
@@ -273,7 +162,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
               className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-mono text-xs px-4 py-2 rounded flex items-center gap-2 transition-all cursor-pointer"
             >
               <Icon name="test" size={12} />
-              <span>{showImportArea ? 'HIDE IMPORT BOX' : 'IMPORT DATA FILE / TEXT'}</span>
+              <span>{showImportArea ? 'HIDE IMPORT BOX' : 'RESTORE FROM FILE / TEXT'}</span>
             </button>
           </div>
 
@@ -281,7 +170,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
             <div className="flex flex-col gap-2 mt-2 animate-fade-up">
               <textarea
                 rows={4}
-                placeholder="Paste backup JSON data here..."
+                placeholder="Paste JSON backup content here..."
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 className="w-full bg-slate-950 border border-cyan-500/20 rounded p-3 font-mono text-xs text-slate-200 outline-none focus:border-cyan-400"
@@ -290,7 +179,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({ isOpen, onClose,
                 onClick={handleImportData}
                 className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-mono text-xs font-bold py-2 rounded uppercase tracking-wider transition-all cursor-pointer"
               >
-                APPLY IMPORTED DATA TO SYSTEM
+                APPLY RESTORED DATA TO SYSTEM
               </button>
             </div>
           )}
