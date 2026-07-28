@@ -30,7 +30,9 @@ export const UserManagement: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const loadUsers = async () => {
-    setLoading(true);
+    if (users === null) {
+      setLoading(true);
+    }
     const { data, error } = await sb.from<AppUser>('app_users').select('*', {
       order: 'created_at.desc'
     });

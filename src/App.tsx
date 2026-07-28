@@ -508,7 +508,7 @@ export default function App() {
           {/* Ambient subtle decorative light effect */}
           <div className="absolute top-1/4 left-1/3 w-96 h-96 rounded-full bg-cyan-500/[0.015] blur-3xl pointer-events-none" />
           
-          <div key={dbStatusTick} className="relative z-10 animate-fade-up">
+          <div key={view} className="relative z-10 animate-fade-up">
             {renderViewContent()}
           </div>
         </main>

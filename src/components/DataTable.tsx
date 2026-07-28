@@ -36,7 +36,9 @@ export const DataTable: React.FC<DataTableProps> = ({
   const [msg, setMsg] = useState('');
 
   const loadRecords = async () => {
-    setLoading(true);
+    if (data === null) {
+      setLoading(true);
+    }
     const opts: any = { order: 'created_at.desc', limit: 100 };
     if (filter) {
       opts.filter = filter;
