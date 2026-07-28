@@ -13,7 +13,8 @@ import { NotificationPanel } from './components/NotificationPanel';
 import { AdminOverview } from './components/AdminOverview';
 import { TaskAssignment } from './components/TaskAssignment';
 import { KPICard } from './components/SharedUI';
-import { sb } from './supabaseClient';
+import { sb, getDirectSupabaseConfig } from './supabaseClient';
+import { CloudSyncModal } from './components/CloudSyncModal';
 
 // Dynamic navigation titles
 const navTitles: { [key: string]: string } = {
@@ -49,8 +50,19 @@ export default function App() {
 
   const [view, setView] = useState('overview');
   const [showNotif, setShowNotif] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [isCloudSynced, setIsCloudSynced] = useState(false);
   const [time, setTime] = useState(new Date());
   const [dbStatusTick, setDbStatusTick] = useState(0);
+
+  const checkSyncStatus = () => {
+    const cfg = getDirectSupabaseConfig();
+    setIsCloudSynced(Boolean(cfg));
+  };
+
+  useEffect(() => {
+    checkSyncStatus();
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -492,14 +504,19 @@ export default function App() {
               {/* Alert indicator dot */}
               <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-rose-500 rounded-full border border-slate-900" />
             </button>
-            {/* Online beacon */}
-            <div className="flex items-center gap-2 p-1">
+            {/* Online beacon / Cloud Sync button */}
+            <button
+              onClick={() => setShowSyncModal(true)}
+              className="flex items-center gap-2 p-1 px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-800 border border-cyan-500/30 transition-all cursor-pointer"
+            >
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isCloudSynced ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`}></span>
+                <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${isCloudSynced ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
               </span>
-              <span className="text-[9px] font-mono text-emerald-400 tracking-wider font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">LIVE SERVER SYNC</span>
-            </div>
+              <span className={`text-[9px] font-mono tracking-wider font-semibold ${isCloudSynced ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {isCloudSynced ? '🟢 CLOUD SYNC ACTIVE' : '⚡ CLOUD SYNC SETUP'}
+              </span>
+            </button>
           </div>
         </header>
 
@@ -516,6 +533,13 @@ export default function App() {
 
       {/* SLIDEALERT PANEL */}
       {showNotif && <NotificationPanel user={user} onClose={() => setShowNotif(false)} />}
+
+      {/* CLOUD SYNC MODAL */}
+      <CloudSyncModal
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        onSyncUpdated={checkSyncStatus}
+      />
     </div>
   );
 }
