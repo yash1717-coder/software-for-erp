@@ -55,6 +55,8 @@ export const DataTable: React.FC<DataTableProps> = ({
 
   useEffect(() => {
     loadRecords();
+    const interval = setInterval(loadRecords, 4000);
+    return () => clearInterval(interval);
   }, [table, filter]);
 
   const handleSaveRecord = async () => {

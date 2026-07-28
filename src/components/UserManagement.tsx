@@ -55,6 +55,8 @@ export const UserManagement: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
+    const interval = setInterval(loadUsers, 4000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleCreateUser = async () => {

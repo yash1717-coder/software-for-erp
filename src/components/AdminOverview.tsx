@@ -285,6 +285,10 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({ user }) => {
 
   useEffect(() => {
     loadOverviewData();
+    const interval = setInterval(() => {
+      loadOverviewData();
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const calData = calView === 'daily' ? financials.slice(-7) : financials;
