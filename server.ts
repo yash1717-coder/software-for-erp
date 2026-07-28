@@ -20,6 +20,10 @@ if (!fs.existsSync(DATA_DIR)) {
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const DB_FILE = path.join(DATA_DIR, "server_db.json");
 
+// Default Supabase project credentials
+const DEFAULT_SUPABASE_URL = "https://sfhnaamxhwmzppmcmvbo.supabase.co";
+const DEFAULT_SUPABASE_KEY = "sb_publishable_hkCdMoiafha4Zxs6nm0t0Q_nZBb-JQD";
+
 // Load backend configuration
 function loadBackendConfig() {
   let url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -35,10 +39,14 @@ function loadBackendConfig() {
     }
   }
 
-  const isConfigured = 
-    Boolean(url && key) && 
-    !url.includes("your-project.supabase.co") && 
-    !key.includes("your-anon-key");
+  if (!url || url.includes("your-project.supabase.co")) {
+    url = DEFAULT_SUPABASE_URL;
+  }
+  if (!key || key.includes("your-anon-key")) {
+    key = DEFAULT_SUPABASE_KEY;
+  }
+
+  const isConfigured = Boolean(url && key);
 
   return { url, key, isConfigured };
 }

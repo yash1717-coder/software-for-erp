@@ -13,8 +13,7 @@ import { NotificationPanel } from './components/NotificationPanel';
 import { AdminOverview } from './components/AdminOverview';
 import { TaskAssignment } from './components/TaskAssignment';
 import { KPICard } from './components/SharedUI';
-import { sb, getSupabaseCredentials } from './supabaseClient';
-import { DatabaseConfigModal } from './components/DatabaseConfigModal';
+import { sb } from './supabaseClient';
 
 // Dynamic navigation titles
 const navTitles: { [key: string]: string } = {
@@ -51,7 +50,6 @@ export default function App() {
   const [view, setView] = useState('overview');
   const [showNotif, setShowNotif] = useState(false);
   const [time, setTime] = useState(new Date());
-  const [showDbConfig, setShowDbConfig] = useState(false);
   const [dbStatusTick, setDbStatusTick] = useState(0);
 
   useEffect(() => {
@@ -495,17 +493,13 @@ export default function App() {
               <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-rose-500 rounded-full border border-slate-900" />
             </button>
             {/* Online beacon */}
-            <button
-              onClick={() => setShowDbConfig(true)}
-              className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity bg-transparent border-none p-1 focus:outline-none"
-              title="Click to configure backend database synchronization settings"
-            >
+            <div className="flex items-center gap-2 p-1">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
               </span>
               <span className="text-[9px] font-mono text-emerald-400 tracking-wider font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">LIVE SERVER SYNC</span>
-            </button>
+            </div>
           </div>
         </header>
 
@@ -519,14 +513,6 @@ export default function App() {
           </div>
         </main>
       </div>
-
-      {/* DATABASE CONFIGURATION MODAL */}
-      {showDbConfig && (
-        <DatabaseConfigModal 
-          onClose={() => setShowDbConfig(false)} 
-          onSave={() => setDbStatusTick((t) => t + 1)} 
-        />
-      )}
 
       {/* SLIDEALERT PANEL */}
       {showNotif && <NotificationPanel user={user} onClose={() => setShowNotif(false)} />}
