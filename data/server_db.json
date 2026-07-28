@@ -1,6 +1,18 @@
 {
   "app_users": [
     {
+      "id": "a8272563-9994-4c62-a0cf-090cfa01117e",
+      "created_at": "2026-07-28T07:22:06.697Z",
+      "user_id": "mobile_101",
+      "name": "Mobile User",
+      "full_name": "Mobile User",
+      "password": "123",
+      "role": "employee",
+      "department": "Assembly",
+      "contact": "mobile@infiev.com",
+      "is_active": true
+    },
+    {
       "id": "99abd135-3344-4d88-9623-09421bb26732",
       "created_at": "2026-07-28T07:01:48.079Z",
       "user_id": "test_101",

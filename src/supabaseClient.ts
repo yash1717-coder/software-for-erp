@@ -9,36 +9,61 @@ export interface SupabaseFilter {
   val: string | number;
 }
 
-export async function getSupabaseCredentials(): Promise<{ url: string; isLocal: boolean; configured: boolean }> {
+const CLOUD_RUN_BACKEND = "https://ais-pre-kkhw5jj76wwdxxv75vlqc3-594375269974.asia-southeast1.run.app";
+
+async function fetchDbApi(endpointPath: string, options: RequestInit = {}): Promise<Response | null> {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+
+  // 1. Try local/relative endpoint
   try {
-    const res = await fetch('/api/config');
-    if (res.ok) {
-      const data = await res.json();
-      return { url: data.url || '', isLocal: !data.configured, configured: Boolean(data.configured) };
+    const res = await fetch(endpointPath, { ...options, headers });
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
+      return res;
     }
   } catch (e) {
-    // Ignore fetch failure
+    // Relative fetch failed
+  }
+
+  // 2. Try shared Cloud Run backend URL if relative returned 404/non-json (e.g. Vercel static host)
+  try {
+    const fullUrl = `${CLOUD_RUN_BACKEND}${endpointPath}`;
+    const res = await fetch(fullUrl, { ...options, headers });
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
+      return res;
+    }
+  } catch (e) {
+    // Shared Cloud Run backend unreachable
+  }
+
+  return null;
+}
+
+export async function getSupabaseCredentials(): Promise<{ url: string; isLocal: boolean; configured: boolean }> {
+  const res = await fetchDbApi('/api/config');
+  if (res) {
+    try {
+      const data = await res.json();
+      return { url: data.url || '', isLocal: !data.configured, configured: Boolean(data.configured) };
+    } catch {
+      // ignore
+    }
   }
   return { url: '', isLocal: true, configured: false };
 }
 
 export async function saveSupabaseCredentials(url: string, key: string): Promise<boolean> {
-  try {
-    const res = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, key })
-    });
-    return res.ok;
-  } catch (e) {
-    console.error('Failed to update server database credentials:', e);
-    return false;
-  }
+  const res = await fetchDbApi('/api/config', {
+    method: 'POST',
+    body: JSON.stringify({ url, key })
+  });
+  return Boolean(res && res.ok);
 }
 
 export const isLocalMode = false;
 
-// Seed initial fallback data for static/client environment (only initial admin)
+// Seed initial fallback data for static/offline environment (only initial admin)
 const INITIAL_FALLBACK_USERS = [
   {
     id: 'user_admin_01',
@@ -130,24 +155,22 @@ export const sb = {
   from: <T = any>(table: string) => {
     return {
       select: async (cols: string = '*', opts: SupabaseOptions = {}): Promise<{ data: T[] | null; error: string | null }> => {
-        try {
-          let url = `/api/db/${table}?select=${encodeURIComponent(cols)}`;
-          if (opts.order) url += `&order=${encodeURIComponent(opts.order)}`;
-          if (opts.limit) url += `&limit=${opts.limit}`;
-          if (opts.filter) url += `&filter=${encodeURIComponent(opts.filter)}`;
+        let url = `/api/db/${table}?select=${encodeURIComponent(cols)}`;
+        if (opts.order) url += `&order=${encodeURIComponent(opts.order)}`;
+        if (opts.limit) url += `&limit=${opts.limit}`;
+        if (opts.filter) url += `&filter=${encodeURIComponent(opts.filter)}`;
 
-          const r = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
-          const contentType = r.headers.get('content-type') || '';
-          
-          if (r.ok && contentType.includes('application/json')) {
+        const r = await fetchDbApi(url);
+        if (r) {
+          try {
             const res = await r.json();
             return { data: res.data as T[], error: res.error || null };
+          } catch (e: any) {
+            console.warn(`Error parsing DB JSON for [${table}]:`, e);
           }
-        } catch (e: any) {
-          console.warn(`Backend server API unavailable for select [${table}], using local fallback:`, e?.message);
         }
 
-        // Fallback store handling if backend API returned 404 or non-JSON
+        // Fallback store handling if backend server is completely unavailable
         const store = getFallbackStore();
         let rows = store[table] || [];
 
@@ -179,20 +202,18 @@ export const sb = {
           ...r
         }));
 
-        try {
-          const r = await fetch(`/api/db/${table}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(processed)
-          });
-          const contentType = r.headers.get('content-type') || '';
+        const r = await fetchDbApi(`/api/db/${table}`, {
+          method: 'POST',
+          body: JSON.stringify(processed)
+        });
 
-          if (r.ok && contentType.includes('application/json')) {
+        if (r) {
+          try {
             const res = await r.json();
             return { data: res.data as T[], error: res.error || null };
+          } catch (e: any) {
+            console.warn(`Error parsing insert DB JSON for [${table}]:`, e);
           }
-        } catch (e: any) {
-          console.warn(`Backend server API unavailable for insert [${table}], using local fallback:`, e?.message);
         }
 
         // Fallback store handling
@@ -205,22 +226,21 @@ export const sb = {
       },
 
       update: async (row: Partial<T>, filter: SupabaseFilter): Promise<{ data: T[] | null; error: string | null }> => {
-        try {
-          const filterStr = `${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
-          const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
-          const r = await fetch(url, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(row)
-          });
-          const contentType = r.headers.get('content-type') || '';
+        const filterStr = `${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
+        const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
 
-          if (r.ok && contentType.includes('application/json')) {
+        const r = await fetchDbApi(url, {
+          method: 'PATCH',
+          body: JSON.stringify(row)
+        });
+
+        if (r) {
+          try {
             const res = await r.json();
             return { data: res.data as T[], error: res.error || null };
+          } catch (e: any) {
+            console.warn(`Error parsing update DB JSON for [${table}]:`, e);
           }
-        } catch (e: any) {
-          console.warn(`Backend server API unavailable for update [${table}], using local fallback:`, e?.message);
         }
 
         // Fallback store handling
@@ -241,21 +261,18 @@ export const sb = {
       },
 
       delete: async (filter: SupabaseFilter): Promise<{ error: string | null }> => {
-        try {
-          const filterStr = `${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
-          const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
-          const r = await fetch(url, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' }
-          });
-          const contentType = r.headers.get('content-type') || '';
+        const filterStr = `${filter.col}=eq.${encodeURIComponent(String(filter.val))}`;
+        const url = `/api/db/${table}?filter=${encodeURIComponent(filterStr)}`;
 
-          if (r.ok && contentType.includes('application/json')) {
+        const r = await fetchDbApi(url, { method: 'DELETE' });
+
+        if (r) {
+          try {
             const res = await r.json();
             return { error: res.error || null };
+          } catch (e: any) {
+            console.warn(`Error parsing delete DB JSON for [${table}]:`, e);
           }
-        } catch (e: any) {
-          console.warn(`Backend server API unavailable for delete [${table}], using local fallback:`, e?.message);
         }
 
         // Fallback store handling
