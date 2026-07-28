@@ -54,11 +54,17 @@ export default function App() {
   const [showDbConfig, setShowDbConfig] = useState(false);
   const [dbStatusTick, setDbStatusTick] = useState(0);
 
-  const { isLocal } = getSupabaseCredentials();
-
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Periodic database auto-sync across all devices (every 5 seconds)
+  useEffect(() => {
+    const syncInterval = setInterval(() => {
+      setDbStatusTick((t) => t + 1);
+    }, 5000);
+    return () => clearInterval(syncInterval);
   }, []);
 
   const handleLogin = (u: AppUser) => {
@@ -492,25 +498,13 @@ export default function App() {
             <button
               onClick={() => setShowDbConfig(true)}
               className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity bg-transparent border-none p-1 focus:outline-none"
-              title="Click to configure Supabase database synchronization settings"
+              title="Click to configure backend database synchronization settings"
             >
-              {isLocal ? (
-                <>
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
-                  </span>
-                  <span className="text-[9px] font-mono text-amber-400 tracking-wider font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">LOCAL OFFLINE DEMO</span>
-                </>
-              ) : (
-                <>
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                  </span>
-                  <span className="text-[9px] font-mono text-emerald-400 tracking-wider font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">LIVE DATABASE SYNC</span>
-                </>
-              )}
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-[9px] font-mono text-emerald-400 tracking-wider font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">LIVE SERVER SYNC</span>
             </button>
           </div>
         </header>

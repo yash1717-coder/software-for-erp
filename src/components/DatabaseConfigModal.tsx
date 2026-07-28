@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Database, Save, X, Info, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Database, Save, X, Info, CheckCircle, Server } from 'lucide-react';
 import { getSupabaseCredentials, saveSupabaseCredentials } from '../supabaseClient';
 
 interface DatabaseConfigModalProps {
@@ -8,12 +8,18 @@ interface DatabaseConfigModalProps {
 }
 
 export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProps) {
-  const { url: currentUrl, key: currentKey, isLocal } = getSupabaseCredentials();
-  
-  const [url, setUrl] = useState(isLocal && currentUrl.includes("sfhnaamxhwmzppmcmvbo") ? '' : currentUrl);
-  const [key, setKey] = useState(isLocal && currentKey.includes("sb_publishable") ? '' : currentKey);
+  const [url, setUrl] = useState('');
+  const [key, setKey] = useState('');
+  const [isConfigured, setIsConfigured] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errMsg, setErrMsg] = useState('');
+
+  useEffect(() => {
+    getSupabaseCredentials().then((cfg) => {
+      setUrl(cfg.url || '');
+      setIsConfigured(cfg.configured);
+    });
+  }, []);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,7 +30,7 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
     const targetKey = key.trim();
 
     if (!targetUrl || !targetKey) {
-      saveSupabaseCredentials('', '');
+      await saveSupabaseCredentials('', '');
       setStatus('success');
       onSave();
       setTimeout(onClose, 1000);
@@ -38,40 +44,28 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
     }
 
     try {
-      // Connect test request
-      const testHeaders = {
-        'apikey': targetKey,
-        'Authorization': `Bearer ${targetKey}`
-      };
-      
-      const res = await fetch(`${targetUrl}/rest/v1/`, {
-        method: 'GET',
-        headers: testHeaders
-      });
-
-      if (!res.ok && res.status !== 404) {
-        const text = await res.text();
-        throw new Error(`Connectivity test returned HTTP ${res.status} ${text || ''}`);
+      const ok = await saveSupabaseCredentials(targetUrl, targetKey);
+      if (ok) {
+        setStatus('success');
+        setIsConfigured(true);
+        onSave();
+        setTimeout(onClose, 1000);
+      } else {
+        throw new Error('Server rejected configuration update.');
       }
-
-      saveSupabaseCredentials(targetUrl, targetKey);
-      setStatus('success');
-      onSave();
-      setTimeout(onClose, 1000);
     } catch (err: any) {
       console.warn(err);
-      saveSupabaseCredentials(targetUrl, targetKey);
       setStatus('error');
-      setErrMsg(`Could not reach host, but credentials saved anyway as local configuration override. Error: ${err.message || err}`);
-      onSave();
+      setErrMsg(`Failed to save server credentials: ${err.message || err}`);
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setUrl('');
     setKey('');
-    saveSupabaseCredentials('', '');
+    await saveSupabaseCredentials('', '');
     setStatus('success');
+    setIsConfigured(false);
     onSave();
     setTimeout(onClose, 1000);
   };
@@ -84,7 +78,7 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
         <div className="px-6 py-4 border-b border-cyan-500/15 flex items-center justify-between bg-slate-950/50">
           <div className="flex items-center gap-2 text-cyan-400">
             <Database size={16} className="animate-pulse" />
-            <span className="font-mono text-xs font-bold tracking-wider uppercase">DATABASE CONNECTION SETUP</span>
+            <span className="font-mono text-xs font-bold tracking-wider uppercase">BACKEND DATABASE SETUP</span>
           </div>
           <button 
             onClick={onClose}
@@ -97,33 +91,31 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
         {/* Content */}
         <form onSubmit={handleSave} className="p-6 space-y-5">
           <p className="text-xs text-slate-300 leading-relaxed font-sans">
-            INFIEV Manufacturing ERP utilizes <strong className="text-cyan-400">Supabase</strong> for global multi-device synchronization. Supply your project details below to bind your real database.
+            INFIEV Manufacturing ERP uses a centralized <strong className="text-cyan-400">Full-Stack Express Backend</strong>. All database API keys remain strictly hidden on the server for security and global device sync.
           </p>
 
           {/* Status Indicator */}
           <div className={`p-3 rounded border text-xs font-mono ${
-            isLocal 
-              ? 'bg-amber-500/5 border-amber-500/20 text-amber-400' 
-              : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'
+            isConfigured 
+              ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' 
+              : 'bg-cyan-500/5 border-cyan-500/20 text-cyan-400'
           }`}>
             <div className="flex items-center gap-2">
-              <span className={`h-1.5 w-1.5 rounded-full ${isLocal ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
+              <Server size={14} className="text-cyan-400 shrink-0" />
               <span className="font-bold">
-                STATUS: {isLocal ? 'OFFLINE LOCAL STORAGE (DEMO)' : 'CONNECTED TO REMOTE SUPABASE'}
+                STATUS: {isConfigured ? 'CONNECTED TO REMOTE SUPABASE VIA BACKEND' : 'SERVER DATABASE (SYNCD ACROSS ALL DEVICES)'}
               </span>
             </div>
-            {isLocal && (
-              <p className="text-[10px] text-slate-400 mt-1">
-                Data is stored in this browser only. Connect your Supabase instance to view and manage data from other mobiles and laptops!
-              </p>
-            )}
+            <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+              All data created by admins or employees is stored directly on the server database and synced across every phone, laptop, and browser connected to this app!
+            </p>
           </div>
 
           <div className="space-y-4">
             {/* URL */}
             <div>
               <label className="block font-mono text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider">
-                Supabase Project URL *
+                Supabase Project URL (Stored on Backend)
               </label>
               <input
                 type="text"
@@ -131,37 +123,36 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://your-project.supabase.co"
                 className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500/50 rounded px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none transition-colors"
-                required
               />
             </div>
 
             {/* Key */}
             <div>
               <label className="block font-mono text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider">
-                Supabase Anon Public Key *
+                Supabase Anon / Service Key (Hidden on Backend)
               </label>
-              <textarea
+              <input
+                type="password"
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500/50 rounded px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none transition-colors h-16 resize-none"
-                required
+                placeholder="••••••••••••••••••••••••••••"
+                className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500/50 rounded px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none transition-colors"
               />
             </div>
           </div>
 
-          {/* Vercel specs */}
+          {/* Environment Variables Note */}
           <div className="bg-slate-950/80 p-4 rounded border border-slate-800 text-slate-300 text-xs space-y-2 font-sans">
             <div className="flex items-center gap-1.5 text-cyan-400 font-mono text-[10px] font-bold tracking-wider uppercase">
               <Info size={12} />
-              <span>Synchronize All Devices Automatically</span>
+              <span>Backend Environment Configuration</span>
             </div>
             <p className="text-[11px] text-slate-400 leading-normal">
-              To sync all operator and manager devices instantly without pasting credentials, set these <strong className="text-slate-200">Environment Variables</strong> on your Vercel Dashboard, then redeploy:
+              To configure server database credentials persistently on host, set these environment variables on your server:
             </p>
             <div className="p-2 bg-slate-900 rounded font-mono text-[10px] text-cyan-300 space-y-1 select-all border border-slate-800/50">
-              <div>VITE_SUPABASE_URL = (your URL)</div>
-              <div>VITE_SUPABASE_ANON_KEY = (your key)</div>
+              <div>SUPABASE_URL = (your URL)</div>
+              <div>SUPABASE_ANON_KEY = (your key)</div>
             </div>
           </div>
 
@@ -169,7 +160,7 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
           {status === 'success' && (
             <div className="text-xs font-mono text-emerald-400 bg-emerald-500/10 p-2.5 rounded border border-emerald-500/20 flex items-center gap-2">
               <CheckCircle size={14} />
-              <span>Settings saved successfully! Syncing views...</span>
+              <span>Server database configuration updated successfully!</span>
             </div>
           )}
           {status === 'error' && (
@@ -186,7 +177,7 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
               onClick={handleReset}
               className="text-slate-400 hover:text-slate-200 text-[10px] font-mono hover:underline cursor-pointer"
             >
-              Reset to Local Mode
+              Reset Backend Config
             </button>
             <div className="flex items-center gap-2">
               <button
@@ -201,7 +192,7 @@ export function DatabaseConfigModal({ onClose, onSave }: DatabaseConfigModalProp
                 className="px-4 py-1.5 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-mono text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
               >
                 <Save size={13} />
-                Connect
+                Save Backend Config
               </button>
             </div>
           </div>
