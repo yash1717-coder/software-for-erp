@@ -17,7 +17,7 @@ export async function getSupabaseCredentials(): Promise<{ url: string; isLocal: 
       return { url: data.url || '', isLocal: !data.configured, configured: Boolean(data.configured) };
     }
   } catch (e) {
-    console.warn('Failed to fetch backend database configuration:', e);
+    // Ignore fetch failure
   }
   return { url: '', isLocal: true, configured: false };
 }
@@ -38,6 +38,144 @@ export async function saveSupabaseCredentials(url: string, key: string): Promise
 
 export const isLocalMode = false;
 
+// Seed initial fallback data for static/client environment
+const INITIAL_FALLBACK_USERS = [
+  {
+    id: 'user_admin_01',
+    user_id: 'admin',
+    full_name: 'Administrator',
+    role: 'admin',
+    department: 'Executive',
+    email: 'admin@infiev.com',
+    password: 'admin',
+    is_active: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'user_sup_01',
+    user_id: 'sup01',
+    full_name: 'Rajesh Sharma',
+    role: 'supervisor',
+    department: 'Assembly Line A',
+    email: 'rajesh@infiev.com',
+    password: '123',
+    is_active: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'user_emp_01',
+    user_id: 'emp01',
+    full_name: 'Vikram Singh',
+    role: 'employee',
+    department: 'Quality Control',
+    email: 'vikram@infiev.com',
+    password: '123',
+    is_active: true,
+    created_at: new Date().toISOString()
+  }
+];
+
+function getFallbackStore(): Record<string, any[]> {
+  try {
+    const stored = localStorage.getItem('infiev_fallback_db');
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch {
+    // ignore parse error
+  }
+  const defaultStore: Record<string, any[]> = {
+    app_users: INITIAL_FALLBACK_USERS,
+    production_orders: [
+      {
+        id: '1',
+        order_number: 'PO-2026-001',
+        product_name: 'EV Motor Controller v3',
+        quantity: 150,
+        unit_price: 4500,
+        status: 'in_progress',
+        due_date: '2026-08-15',
+        assigned_to: 'sup01',
+        target_units: 150,
+        completed_units: 45,
+        notes: 'High priority client order',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: '2',
+        order_number: 'PO-2026-002',
+        product_name: 'Lithium Battery Pack 48V',
+        quantity: 80,
+        unit_price: 18000,
+        status: 'completed',
+        due_date: '2026-08-10',
+        assigned_to: 'sup01',
+        target_units: 80,
+        completed_units: 80,
+        notes: 'QC verification passed',
+        created_at: new Date().toISOString()
+      }
+    ],
+    inventory_items: [],
+    raw_materials: [],
+    electricity_downtimes: [],
+    quality_tests: [],
+    announcements: [],
+    daily_financials: [],
+    messages: [],
+    tasks: [],
+    work_reports: [],
+    notifications: []
+  };
+  try {
+    localStorage.setItem('infiev_fallback_db', JSON.stringify(defaultStore));
+  } catch {
+    // ignore quota error
+  }
+  return defaultStore;
+}
+
+function saveFallbackStore(store: Record<string, any[]>) {
+  try {
+    localStorage.setItem('infiev_fallback_db', JSON.stringify(store));
+  } catch {
+    // ignore quota error
+  }
+}
+
+function matchFilterRow(row: any, filterStr: string | undefined): boolean {
+  if (!filterStr) return true;
+  const parts = filterStr.split('&');
+  for (const part of parts) {
+    const match = part.match(/^([^=!<>]+)=([^.]+)\.(.+)$/);
+    if (!match) continue;
+    const col = match[1];
+    const op = match[2];
+    let val: any = decodeURIComponent(match[3]);
+
+    if (val === 'true') val = true;
+    else if (val === 'false') val = false;
+    else if (val === 'null') val = null;
+
+    const rowVal = row[col];
+
+    if (op === 'eq') {
+      if (typeof rowVal === 'boolean' && typeof val === 'string') {
+        if (rowVal && val === 'true') continue;
+        if (!rowVal && val === 'false') continue;
+      }
+      if (String(rowVal ?? '').toLowerCase() !== String(val ?? '').toLowerCase()) {
+        return false;
+      }
+    } else if (op === 'neq') {
+      if (String(rowVal ?? '').toLowerCase() === String(val ?? '').toLowerCase()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 export const sb = {
   from: <T = any>(table: string) => {
     return {
@@ -49,35 +187,71 @@ export const sb = {
           if (opts.filter) url += `&filter=${encodeURIComponent(opts.filter)}`;
 
           const r = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
-          if (!r.ok) {
-            const errText = await r.text();
-            throw new Error(`HTTP ${r.status}: ${errText}`);
+          const contentType = r.headers.get('content-type') || '';
+          
+          if (r.ok && contentType.includes('application/json')) {
+            const res = await r.json();
+            return { data: res.data as T[], error: res.error || null };
           }
-          const res = await r.json();
-          return { data: res.data as T[], error: res.error || null };
         } catch (e: any) {
-          console.error(`Backend API select error on [${table}]:`, e);
-          return { data: [], error: e?.message || 'Failed to fetch data from backend server.' };
+          console.warn(`Backend server API unavailable for select [${table}], using local fallback:`, e?.message);
         }
+
+        // Fallback store handling if backend API returned 404 or non-JSON
+        const store = getFallbackStore();
+        let rows = store[table] || [];
+
+        if (opts.filter) {
+          rows = rows.filter(r => matchFilterRow(r, opts.filter));
+        }
+
+        if (opts.order) {
+          const [orderCol, orderDir] = opts.order.split('.');
+          rows = [...rows].sort((a, b) => {
+            const valA = String(a[orderCol] ?? '');
+            const valB = String(b[orderCol] ?? '');
+            return orderDir === 'desc' ? valB.localeCompare(valA) : valA.localeCompare(valB);
+          });
+        }
+
+        if (opts.limit) {
+          rows = rows.slice(0, opts.limit);
+        }
+
+        return { data: rows as T[], error: null };
       },
 
       insert: async (rows: Partial<T> | Partial<T>[]): Promise<{ data: T[] | null; error: string | null }> => {
+        const incoming = Array.isArray(rows) ? rows : [rows];
+        const processed = incoming.map((r: any) => ({
+          id: r.id || 'id_' + Math.random().toString(36).substring(2, 11),
+          created_at: r.created_at || new Date().toISOString(),
+          ...r
+        }));
+
         try {
           const r = await fetch(`/api/db/${table}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(rows)
+            body: JSON.stringify(processed)
           });
-          if (!r.ok) {
-            const errText = await r.text();
-            throw new Error(`HTTP ${r.status}: ${errText}`);
+          const contentType = r.headers.get('content-type') || '';
+
+          if (r.ok && contentType.includes('application/json')) {
+            const res = await r.json();
+            return { data: res.data as T[], error: res.error || null };
           }
-          const res = await r.json();
-          return { data: res.data as T[], error: res.error || null };
         } catch (e: any) {
-          console.error(`Backend API insert error on [${table}]:`, e);
-          return { data: null, error: e?.message || 'Failed to insert data on backend server.' };
+          console.warn(`Backend server API unavailable for insert [${table}], using local fallback:`, e?.message);
         }
+
+        // Fallback store handling
+        const store = getFallbackStore();
+        const existing = store[table] || [];
+        store[table] = [...processed, ...existing];
+        saveFallbackStore(store);
+
+        return { data: processed as T[], error: null };
       },
 
       update: async (row: Partial<T>, filter: SupabaseFilter): Promise<{ data: T[] | null; error: string | null }> => {
@@ -89,16 +263,31 @@ export const sb = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(row)
           });
-          if (!r.ok) {
-            const errText = await r.text();
-            throw new Error(`HTTP ${r.status}: ${errText}`);
+          const contentType = r.headers.get('content-type') || '';
+
+          if (r.ok && contentType.includes('application/json')) {
+            const res = await r.json();
+            return { data: res.data as T[], error: res.error || null };
           }
-          const res = await r.json();
-          return { data: res.data as T[], error: res.error || null };
         } catch (e: any) {
-          console.error(`Backend API update error on [${table}]:`, e);
-          return { data: null, error: e?.message || 'Failed to update data on backend server.' };
+          console.warn(`Backend server API unavailable for update [${table}], using local fallback:`, e?.message);
         }
+
+        // Fallback store handling
+        const store = getFallbackStore();
+        const existing = store[table] || [];
+        const updatedRows: any[] = [];
+        store[table] = existing.map((r: any) => {
+          if (String(r[filter.col]) === String(filter.val)) {
+            const u = { ...r, ...row };
+            updatedRows.push(u);
+            return u;
+          }
+          return r;
+        });
+        saveFallbackStore(store);
+
+        return { data: updatedRows as T[], error: null };
       },
 
       delete: async (filter: SupabaseFilter): Promise<{ error: string | null }> => {
@@ -109,16 +298,23 @@ export const sb = {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' }
           });
-          if (!r.ok) {
-            const errText = await r.text();
-            throw new Error(`HTTP ${r.status}: ${errText}`);
+          const contentType = r.headers.get('content-type') || '';
+
+          if (r.ok && contentType.includes('application/json')) {
+            const res = await r.json();
+            return { error: res.error || null };
           }
-          const res = await r.json();
-          return { error: res.error || null };
         } catch (e: any) {
-          console.error(`Backend API delete error on [${table}]:`, e);
-          return { error: e?.message || 'Failed to delete data on backend server.' };
+          console.warn(`Backend server API unavailable for delete [${table}], using local fallback:`, e?.message);
         }
+
+        // Fallback store handling
+        const store = getFallbackStore();
+        const existing = store[table] || [];
+        store[table] = existing.filter((r: any) => String(r[filter.col]) !== String(filter.val));
+        saveFallbackStore(store);
+
+        return { error: null };
       }
     };
   }

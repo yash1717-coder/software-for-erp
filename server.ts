@@ -39,14 +39,11 @@ function loadBackendConfig() {
     }
   }
 
-  if (!url || url.includes("your-project.supabase.co")) {
-    url = DEFAULT_SUPABASE_URL;
-  }
-  if (!key || key.includes("your-anon-key")) {
-    key = DEFAULT_SUPABASE_KEY;
-  }
-
-  const isConfigured = Boolean(url && key);
+  const isConfigured = 
+    Boolean(url && key) && 
+    !url.includes("your-project.supabase.co") && 
+    !url.includes("sfhnaamxhwmzppmcmvbo.supabase.co") &&
+    !key.includes("your-anon-key");
 
   return { url, key, isConfigured };
 }
