@@ -37,8 +37,17 @@ export const UserManagement: React.FC = () => {
       order: 'created_at.desc'
     });
     if (!error && data) {
-      setUsers(data);
+      // Normalize user records to have both name and full_name
+      const normalized = data.map((u: any) => ({
+        ...u,
+        name: u.name || u.full_name || u.user_id || 'User',
+        full_name: u.full_name || u.name || u.user_id || 'User',
+        department: u.department || '',
+        contact: u.contact || u.email || ''
+      }));
+      setUsers(normalized);
     } else {
+      if (users === null) setUsers([]);
       console.error("Error loading users:", error);
     }
     setLoading(false);
@@ -56,9 +65,10 @@ export const UserManagement: React.FC = () => {
     setSaving(true);
     setMsg('');
 
-    const payload: AppUser = {
+    const payload: any = {
       user_id: form.user_id.trim(),
       name: form.name.trim(),
+      full_name: form.name.trim(),
       password: form.password,
       role: form.role,
       department: form.department.trim(),
@@ -71,7 +81,7 @@ export const UserManagement: React.FC = () => {
     setSaving(false);
 
     if (error) {
-      setMsg('Error: ' + error);
+      setMsg('Error creating account: ' + error);
       return;
     }
 
@@ -93,8 +103,9 @@ export const UserManagement: React.FC = () => {
     setSaving(true);
     setMsg('');
 
-    const payload: Partial<AppUser> = {
+    const payload: any = {
       name: editForm.name?.trim(),
+      full_name: editForm.name?.trim(),
       department: editForm.department?.trim(),
       contact: editForm.contact?.trim(),
       role: editForm.role,
@@ -109,7 +120,7 @@ export const UserManagement: React.FC = () => {
     setSaving(false);
 
     if (error) {
-      setMsg('Error: ' + error);
+      setMsg('Error updating user: ' + error);
       return;
     }
 
@@ -146,12 +157,16 @@ export const UserManagement: React.FC = () => {
 
   // Filter and Search logic
   const displayedUsers = (users || []).filter((u) => {
+    if (!u) return false;
     const matchesFilter = filter === 'all' ? true : u.role === filter;
-    const searchLower = searchQuery.toLowerCase();
+    const searchLower = (searchQuery || '').toLowerCase();
+    const userName = (u.name || u.full_name || '').toLowerCase();
+    const userId = (u.user_id || '').toLowerCase();
+    const dept = (u.department || '').toLowerCase();
     const matchesSearch =
-      u.name.toLowerCase().includes(searchLower) ||
-      u.user_id.toLowerCase().includes(searchLower) ||
-      (u.department || '').toLowerCase().includes(searchLower);
+      userName.includes(searchLower) ||
+      userId.includes(searchLower) ||
+      dept.includes(searchLower);
     return matchesFilter && matchesSearch;
   });
 
@@ -236,7 +251,7 @@ export const UserManagement: React.FC = () => {
                         {u.user_id}
                       </span>
                     </td>
-                    <td className="p-4 font-semibold text-slate-200">{u.name}</td>
+                    <td className="p-4 font-semibold text-slate-200">{u.name || u.full_name || '—'}</td>
                     <td className="p-4">
                       <span
                         className={`inline-block font-mono text-[9px] tracking-widest px-2 py-0.5 rounded border uppercase ${

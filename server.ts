@@ -56,13 +56,28 @@ function saveBackendConfig(url: string, key: string) {
 function getServerDb(): Record<string, any[]> {
   if (fs.existsSync(DB_FILE)) {
     try {
-      return JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+      const parsed = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
     } catch {
       // Ignore parse failure
     }
   }
+  const defaultAdmin = {
+    id: "user_admin_01",
+    user_id: "admin",
+    name: "Administrator",
+    full_name: "Administrator",
+    password: "admin",
+    role: "admin",
+    department: "Executive",
+    contact: "admin@infiev.com",
+    is_active: true,
+    created_at: new Date().toISOString()
+  };
   const emptyDb: Record<string, any[]> = {
-    app_users: [],
+    app_users: [defaultAdmin],
     production_orders: [],
     inventory_items: [],
     raw_materials: [],

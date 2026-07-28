@@ -38,38 +38,17 @@ export async function saveSupabaseCredentials(url: string, key: string): Promise
 
 export const isLocalMode = false;
 
-// Seed initial fallback data for static/client environment
+// Seed initial fallback data for static/client environment (only initial admin)
 const INITIAL_FALLBACK_USERS = [
   {
     id: 'user_admin_01',
     user_id: 'admin',
+    name: 'Administrator',
     full_name: 'Administrator',
     role: 'admin',
     department: 'Executive',
     email: 'admin@infiev.com',
     password: 'admin',
-    is_active: true,
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'user_sup_01',
-    user_id: 'sup01',
-    full_name: 'Rajesh Sharma',
-    role: 'supervisor',
-    department: 'Assembly Line A',
-    email: 'rajesh@infiev.com',
-    password: '123',
-    is_active: true,
-    created_at: new Date().toISOString()
-  },
-  {
-    id: 'user_emp_01',
-    user_id: 'emp01',
-    full_name: 'Vikram Singh',
-    role: 'employee',
-    department: 'Quality Control',
-    email: 'vikram@infiev.com',
-    password: '123',
     is_active: true,
     created_at: new Date().toISOString()
   }
@@ -86,36 +65,7 @@ function getFallbackStore(): Record<string, any[]> {
   }
   const defaultStore: Record<string, any[]> = {
     app_users: INITIAL_FALLBACK_USERS,
-    production_orders: [
-      {
-        id: '1',
-        order_number: 'PO-2026-001',
-        product_name: 'EV Motor Controller v3',
-        quantity: 150,
-        unit_price: 4500,
-        status: 'in_progress',
-        due_date: '2026-08-15',
-        assigned_to: 'sup01',
-        target_units: 150,
-        completed_units: 45,
-        notes: 'High priority client order',
-        created_at: new Date().toISOString()
-      },
-      {
-        id: '2',
-        order_number: 'PO-2026-002',
-        product_name: 'Lithium Battery Pack 48V',
-        quantity: 80,
-        unit_price: 18000,
-        status: 'completed',
-        due_date: '2026-08-10',
-        assigned_to: 'sup01',
-        target_units: 80,
-        completed_units: 80,
-        notes: 'QC verification passed',
-        created_at: new Date().toISOString()
-      }
-    ],
+    production_orders: [],
     inventory_items: [],
     raw_materials: [],
     electricity_downtimes: [],
