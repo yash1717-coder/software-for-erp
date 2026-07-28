@@ -9,32 +9,31 @@ export interface SupabaseFilter {
   val: string | number;
 }
 
-const CLOUD_RUN_BACKEND = "https://ais-pre-kkhw5jj76wwdxxv75vlqc3-594375269974.asia-southeast1.run.app";
+const CANDIDATE_BACKENDS = [
+  "", // relative path for same-origin
+  "https://ais-pre-kkhw5jj76wwdxxv75vlqc3-594375269974.asia-southeast1.run.app",
+  "https://ais-dev-kkhw5jj76wwdxxv75vlqc3-594375269974.asia-southeast1.run.app"
+];
 
 async function fetchDbApi(endpointPath: string, options: RequestInit = {}): Promise<Response | null> {
   const headers = { 'Content-Type': 'application/json', ...options.headers };
 
-  // 1. Try local/relative endpoint
-  try {
-    const res = await fetch(endpointPath, { ...options, headers });
-    const contentType = res.headers.get('content-type') || '';
-    if (res.ok && contentType.includes('application/json')) {
-      return res;
+  for (const backend of CANDIDATE_BACKENDS) {
+    try {
+      const fullUrl = `${backend}${endpointPath}`;
+      const res = await fetch(fullUrl, {
+        ...options,
+        headers,
+        mode: 'cors',
+        referrerPolicy: 'no-referrer'
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        return res;
+      }
+    } catch {
+      // Try next candidate endpoint
     }
-  } catch (e) {
-    // Relative fetch failed
-  }
-
-  // 2. Try shared Cloud Run backend URL if relative returned 404/non-json (e.g. Vercel static host)
-  try {
-    const fullUrl = `${CLOUD_RUN_BACKEND}${endpointPath}`;
-    const res = await fetch(fullUrl, { ...options, headers });
-    const contentType = res.headers.get('content-type') || '';
-    if (res.ok && contentType.includes('application/json')) {
-      return res;
-    }
-  } catch (e) {
-    // Shared Cloud Run backend unreachable
   }
 
   return null;
@@ -63,7 +62,7 @@ export async function saveSupabaseCredentials(url: string, key: string): Promise
 
 export const isLocalMode = false;
 
-// Seed initial fallback data for static/offline environment (only initial admin)
+// Seed initial fallback data for static/offline environment
 const INITIAL_FALLBACK_USERS = [
   {
     id: 'user_admin_01',
@@ -118,6 +117,48 @@ function saveFallbackStore(store: Record<string, any[]>) {
   }
 }
 
+// Queue for offline-created items to auto-push when online
+function queuePendingSync(table: string, item: any) {
+  try {
+    const raw = localStorage.getItem('infiev_pending_sync');
+    const queue: { table: string; item: any }[] = raw ? JSON.parse(raw) : [];
+    queue.push({ table, item });
+    localStorage.setItem('infiev_pending_sync', JSON.stringify(queue));
+  } catch {
+    // ignore
+  }
+}
+
+async function flushPendingSync() {
+  try {
+    const raw = localStorage.getItem('infiev_pending_sync');
+    if (!raw) return;
+    const queue: { table: string; item: any }[] = JSON.parse(raw);
+    if (!queue.length) return;
+
+    const remaining: { table: string; item: any }[] = [];
+    for (const entry of queue) {
+      const r = await fetchDbApi(`/api/db/${entry.table}`, {
+        method: 'POST',
+        body: JSON.stringify(entry.item)
+      });
+      if (!r || !r.ok) {
+        remaining.push(entry);
+      }
+    }
+    localStorage.setItem('infiev_pending_sync', JSON.stringify(remaining));
+  } catch {
+    // ignore
+  }
+}
+
+// Background poll to sync pending items
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    flushPendingSync();
+  }, 5000);
+}
+
 function matchFilterRow(row: any, filterStr: string | undefined): boolean {
   if (!filterStr) return true;
   const parts = filterStr.split('&');
@@ -164,7 +205,13 @@ export const sb = {
         if (r) {
           try {
             const res = await r.json();
-            return { data: res.data as T[], error: res.error || null };
+            if (Array.isArray(res.data)) {
+              // Cache in local store
+              const store = getFallbackStore();
+              store[table] = res.data;
+              saveFallbackStore(store);
+              return { data: res.data as T[], error: null };
+            }
           } catch (e: any) {
             console.warn(`Error parsing DB JSON for [${table}]:`, e);
           }
@@ -207,20 +254,28 @@ export const sb = {
           body: JSON.stringify(processed)
         });
 
+        // Always save to fallback store immediately so local client is responsive
+        const store = getFallbackStore();
+        const existing = store[table] || [];
+        // Deduplicate
+        const existingIds = new Set(existing.map((e: any) => e.user_id || e.id));
+        const newUnique = processed.filter((p: any) => !existingIds.has(p.user_id || p.id));
+        store[table] = [...newUnique, ...existing];
+        saveFallbackStore(store);
+
         if (r) {
           try {
             const res = await r.json();
-            return { data: res.data as T[], error: res.error || null };
+            if (Array.isArray(res.data)) {
+              return { data: res.data as T[], error: null };
+            }
           } catch (e: any) {
             console.warn(`Error parsing insert DB JSON for [${table}]:`, e);
           }
+        } else {
+          // Queue for pending sync if server wasn't reached immediately
+          processed.forEach(item => queuePendingSync(table, item));
         }
-
-        // Fallback store handling
-        const store = getFallbackStore();
-        const existing = store[table] || [];
-        store[table] = [...processed, ...existing];
-        saveFallbackStore(store);
 
         return { data: processed as T[], error: null };
       },
@@ -234,16 +289,7 @@ export const sb = {
           body: JSON.stringify(row)
         });
 
-        if (r) {
-          try {
-            const res = await r.json();
-            return { data: res.data as T[], error: res.error || null };
-          } catch (e: any) {
-            console.warn(`Error parsing update DB JSON for [${table}]:`, e);
-          }
-        }
-
-        // Fallback store handling
+        // Update fallback store
         const store = getFallbackStore();
         const existing = store[table] || [];
         const updatedRows: any[] = [];
@@ -257,6 +303,15 @@ export const sb = {
         });
         saveFallbackStore(store);
 
+        if (r) {
+          try {
+            const res = await r.json();
+            return { data: res.data as T[], error: res.error || null };
+          } catch (e: any) {
+            console.warn(`Error parsing update DB JSON for [${table}]:`, e);
+          }
+        }
+
         return { data: updatedRows as T[], error: null };
       },
 
@@ -266,6 +321,12 @@ export const sb = {
 
         const r = await fetchDbApi(url, { method: 'DELETE' });
 
+        // Update fallback store
+        const store = getFallbackStore();
+        const existing = store[table] || [];
+        store[table] = existing.filter((r: any) => String(r[filter.col]) !== String(filter.val));
+        saveFallbackStore(store);
+
         if (r) {
           try {
             const res = await r.json();
@@ -274,12 +335,6 @@ export const sb = {
             console.warn(`Error parsing delete DB JSON for [${table}]:`, e);
           }
         }
-
-        // Fallback store handling
-        const store = getFallbackStore();
-        const existing = store[table] || [];
-        store[table] = existing.filter((r: any) => String(r[filter.col]) !== String(filter.val));
-        saveFallbackStore(store);
 
         return { error: null };
       }

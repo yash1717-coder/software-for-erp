@@ -37,14 +37,23 @@ export const UserManagement: React.FC = () => {
       order: 'created_at.desc'
     });
     if (!error && data) {
-      // Normalize user records to have both name and full_name
-      const normalized = data.map((u: any) => ({
-        ...u,
-        name: u.name || u.full_name || u.user_id || 'User',
-        full_name: u.full_name || u.name || u.user_id || 'User',
-        department: u.department || '',
-        contact: u.contact || u.email || ''
-      }));
+      // Normalize & deduplicate user records by user_id
+      const seen = new Set<string>();
+      const normalized: AppUser[] = [];
+
+      for (const u of data as any[]) {
+        const key = String(u.user_id || u.id || '').trim().toLowerCase();
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+
+        normalized.push({
+          ...u,
+          name: u.name || u.full_name || u.user_id || 'User',
+          full_name: u.full_name || u.name || u.user_id || 'User',
+          department: u.department || '',
+          contact: u.contact || u.email || ''
+        });
+      }
       setUsers(normalized);
     } else {
       if (users === null) setUsers([]);
